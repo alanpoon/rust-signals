@@ -404,7 +404,15 @@ pub trait SignalExt: Signal {
             value: value,
         }
     }
-
+    #[inline]
+    fn before(self, value: Self::Item) -> Before<Self>
+        where Self::Item: PartialEq,
+              Self: Sized {
+        Before {
+            signal: self,
+            value: value,
+        }
+    }
     #[inline]
     fn first(self) -> First<Self> where Self: Sized {
         First {
@@ -875,6 +883,42 @@ impl<A> Future for WaitFor<A>
     }
 }
 
+#[derive(Debug)]
+#[must_use = "Futures do nothing unless polled"]
+pub struct Before<A>
+    where A: Signal,
+          A::Item: PartialEq {
+    signal: A,
+    value: A::Item,
+}
+
+impl<A> Unpin for Before<A> where A: Unpin + Signal, A::Item: PartialEq {}
+
+impl<A> Future for Before<A>
+    where A: Signal,
+          A::Item: PartialEq {
+
+    type Output = Option<A::Item>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        unsafe_project!(self => {
+            pin signal,
+            mut value,
+        });
+
+        loop {
+            let poll = signal.as_mut().poll_change(cx);
+
+            if let Poll::Ready(Some(ref new_value)) = poll {
+                if new_value == value {
+                    continue;
+                }
+            }
+
+            return poll;
+        }
+    }
+}
 
 #[derive(Debug)]
 #[must_use = "SignalVecs do nothing unless polled"]
